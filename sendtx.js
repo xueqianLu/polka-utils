@@ -20,18 +20,18 @@
  *  node sendtx.js --ws ws://127.0.0.1:9944 --seed "//Alice" --to "<dest>" --tps 10 --duration 60
  */
 
-const { ApiPromise, WsProvider } = require('@polkadot/api');
-const { Keyring } = require('@polkadot/keyring');
-const yargs = require('yargs');
-const { hideBin } = require('yargs/helpers');
-const pLimit = require('p-limit');
+import { ApiPromise, WsProvider } from '@polkadot/api';
+import { Keyring } from '@polkadot/keyring';
+import yargs from 'yargs';
+import { hideBin } from 'yargs/helpers';
+import pLimit from 'p-limit';
 
 (async () => {
     const argv = yargs(hideBin(process.argv))
         .option('ws', { type: 'string', default: 'ws://127.0.0.1:9944' })
         .option('seed', { type: 'string', default: '//Alice' })
         .option('to', { type: 'string', demandOption: true })
-        .option('amount', { type: 'string', default: '1000000000000' }) // adjust according to chain decimals
+        .option('amount', { type: 'string', default: '1000000000000' })
         .option('tps', { type: 'number', default: 1 })
         .option('duration', { type: 'number' })
         .option('totalTxs', { type: 'number' })

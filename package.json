@@ -1,6 +1,7 @@
 {
   "name": "polka-utils",
   "version": "1.0.0",
+  "type": "module",
   "description": "utils for polka chain.",
   "main": "index.js",
   "scripts": {
