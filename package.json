@@ -1,0 +1,19 @@
+{
+  "name": "polka-utils",
+  "version": "1.0.0",
+  "description": "utils for polka chain.",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "dependencies": {
+    "@polkadot/api": "^16.4.6",
+    "@polkadot/keyring": "^13.5.6",
+    "@polkadot/util-crypto": "^13.5.6",
+    "p-limit": "^7.1.1",
+    "yargs": "^17.7.2"
+  }
+}
