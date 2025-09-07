@@ -49,3 +49,6 @@ node query.js -e ws://172.17.0.1:50021 -t 0x18ab81410da1de49372f58f2c35348133597
 ```shell
 node query.js -e ws://172.17.0.1:50021 -a "15oF4uVJwmo4TdGW7VfQxNLavjCXviqxT9S1MgbjMNHr6Sp5"
 ```
+
+## collect.js
+[go to doc](./how_to_collect.md)
