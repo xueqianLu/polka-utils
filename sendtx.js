@@ -106,6 +106,7 @@ import pLimit from 'p-limit';
                     if (result.status.isInBlock) {
                         succeeded++;
                         sent++;
+                        console.log(`Tx #${index} included in block. Hash: ${tx.hash.toHex()}`);
                         // console.log(`Tx #${index} included at ${result.status.asInBlock}`);
                         resolve({ status: 'inBlock', hash: tx.hash?.toHex?.() });
                     } else if (result.status.isFinalized) {
