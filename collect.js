@@ -124,20 +124,15 @@ function formatValidatorOutput(stats, format, options = {}) {
         data.blockCount >= options.minBlocks
     );
 
-    const hasRoles = options.showRoles && filteredStats.some(([_, d]) => d.role);
-
     switch (format) {
         case 'json':
             return JSON.stringify(Object.fromEntries(filteredStats), null, 2);
 
         case 'csv': {
-            const csvHeader = hasRoles ? 'Validator,Role,Block Count,Percentage\n' : 'Validator,Block Count,Percentage\n';
+            const csvHeader = 'Validator,Block Count,Percentage\n';
             const blockcount = Object.values(stats).reduce((sum, data) => sum + data.blockCount, 0);
             const csvRows = filteredStats.map(([validator, data]) => {
                 const percentage = blockcount === 0 ? '0.00' : ((data.blockCount / blockcount) * 100).toFixed(2);
-                if (hasRoles) {
-                    return `"${validator}","${data.role || ''}",${data.blockCount},${percentage}%`;
-                }
                 return `"${validator}",${data.blockCount},${percentage}%`;
             }).join('\n');
             return csvHeader + csvRows;
@@ -145,34 +140,24 @@ function formatValidatorOutput(stats, format, options = {}) {
         case 'table':
         default:
             console.log('\n📊 Validator Block Production Statistics:');
-            console.log('='.repeat(hasRoles ? 100 : 80));
+            console.log('='.repeat(80));
 
             const blockcount = Object.values(stats).reduce((sum, data) => sum + data.blockCount, 0);
 
-            if (hasRoles) {
-                console.log(`${'Validator'.padEnd(50)} ${'Role'.padEnd(18)} ${'Blocks'.padStart(10)} ${'Share'.padStart(10)}`);
-                console.log('-'.repeat(100));
-            } else {
-                console.log(`${'Validator'.padEnd(50)} ${'Blocks'.padStart(10)} ${'Share'.padStart(10)}`);
-                console.log('-'.repeat(80));
-            }
+
+            console.log(`${'Validator'.padEnd(50)} ${'Blocks'.padStart(10)} ${'Share'.padStart(10)}`);
+            console.log('-'.repeat(80));
+
 
             filteredStats.forEach(([validator, data]) => {
                 const percentage = blockcount === 0 ? '0.00' : ((data.blockCount / blockcount) * 100).toFixed(2);
                 const shortValidator = validator.length > 47 ? validator.substring(0, 47) + '...' : validator;
-                if (hasRoles) {
-                    const roleShort = (data.role || '').substring(0, 17).padEnd(18);
-                    console.log(`${shortValidator.padEnd(50)} ${roleShort}${data.blockCount.toString().padStart(10)} ${percentage.padStart(8)}%`);
-                } else {
-                    console.log(`${shortValidator.padEnd(50)} ${data.blockCount.toString().padStart(10)} ${percentage.padStart(8)}%`);
-                }
+
+                console.log(`${shortValidator.padEnd(50)} ${data.blockCount.toString().padStart(10)} ${percentage.padStart(8)}%`);
             });
 
-            if (hasRoles) {
-                console.log('-'.repeat(100));
-            } else {
-                console.log('-'.repeat(80));
-            }
+            console.log('-'.repeat(80));
+
             console.log(`Total: ${filteredStats.length} validators, ${blockcount} blocks`);
             return '';
     }
@@ -320,26 +305,16 @@ async function main() {
                 console.log(`💾 Results saved to: ${argv.saveTo}`);
             }
         } else {
-
-            if (!argv.includeEmpty) {
-                Object.keys(validatorStats).forEach(validator => {
-                    if (validatorStats[validator].blockCount === 0) {
-                        delete validatorStats[validator];
-                    }
-                });
-            }
-
             const out = formatValidatorOutput(validatorStats, argv.output, {
                 sortBy: argv.sortBy,
-                minBlocks: argv.minBlocks,
-                showRoles: false
+                minBlocks: argv.minBlocks
             });
             outputData = out;
             if (argv.saveTo) {
                 const fileOutput = formatValidatorOutput(validatorStats,
                     argv.saveTo.endsWith('.json') ? 'json' :
                         argv.saveTo.endsWith('.csv') ? 'csv' : argv.output,
-                    { sortBy: argv.sortBy, minBlocks: argv.minBlocks, showRoles: false }
+                    { sortBy: argv.sortBy, minBlocks: argv.minBlocks }
                 );
                 fs.writeFileSync(argv.saveTo, fileOutput);
                 console.log(`💾 Results saved to: ${argv.saveTo}`);
