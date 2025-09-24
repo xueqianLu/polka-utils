@@ -1,18 +1,4 @@
 #!/usr/bin/env node
-/**
- * 将节点启动时的 --name (你在 nodes 文件里人工填写) 与链上 validator 地址自动关联。
- * 工作原理：
- * 1. 从任意参考节点获取当前 session.validators 列表及每个 validator 的 session.nextKeys，收集所有共识公钥 (babe/grandpa/imonline/authority_discovery/para_validator/para_assignment/beefy)。
- * 2. 逐个连接待匹配的节点 RPC，调用 author.hasKey(pubKey, keyType) 询问“你本地是否持有该公钥对应 keyType”。
- * 3. 一旦匹配成功，认为该节点运行对应 validator 账号。
- * 4. 生成映射 JSON。
- *
- * 重要限制：
- * - 如果节点关闭了 author.* RPC (生产环境常见)，则无法匹配，会标记 unknown。
- * - 如果一个验证者运行多个节点（冗余设置），所有具有相同 session key 的节点都会映射到同一地址。
- * - --name 并不能通过链上直接查询，脚本依赖你提供的列表文件来记录 name 与 endpoint。
- * - 如果链不使用这些共识 key (极少见自定义 runtime)，需手工调整 keyType 映射。
- */
 
 import { ApiPromise, WsProvider } from '@polkadot/api';
 import yargs from 'yargs';
@@ -25,44 +11,44 @@ const argv = yargs(hideBin(process.argv))
     alias: 'r',
     type: 'string',
     default: 'wss://rpc.polkadot.io',
-    describe: '用来读取 validators 与 session.nextKeys 的参考节点'
+    describe: 'Reference node used to read validators and session.nextKeys'
   })
   .option('nodes-file', {
     alias: 'n',
     type: 'string',
     demandOption: true,
-    describe: '包含节点名称与 WS 端点的文本文件, 格式: name,ws://endpoint 或 name ws://endpoint (每行一个)'
+    describe: 'Text file containing node names and WS endpoints, format: name,ws://endpoint or name ws://endpoint (one per line)'
   })
   .option('out', {
     alias: 'o',
     type: 'string',
     default: 'node-validator-map.json',
-    describe: '输出映射 JSON 文件'
+    describe: 'Output mapping JSON file'
   })
   .option('max-per-node-keys', {
     type: 'number',
     default: 20,
-    describe: '最多尝试的公钥数量（防止极端情况下过多 RPC 调用）'
+    describe: 'Maximum number of public keys to try (to prevent excessive RPC calls in extreme cases)'
   })
   .option('concurrency', {
     alias: 'c',
     type: 'number',
     default: 8,
-    describe: '并发连接待匹配节点的数量'
+    describe: 'Number of nodes to connect to concurrently for matching'
   })
   .option('verbose', {
     alias: 'v',
     type: 'boolean',
     default: false,
-    describe: '输出调试日志'
+    describe: 'Output debug logs'
   })
   .help()
   .alias('help','h')
-  .example('$0 -n nodes.txt', '读取 nodes.txt 生成节点名称到 validator 地址的映射')
-  .example('$0 -n nodes.txt -r wss://kusama-rpc.polkadot.io -o kusama-map.json', '指定参考链与输出文件')
+  .example('$0 -n nodes.txt', 'Read nodes.txt and generate a mapping from node names to validator addresses')
+  .example('$0 -n nodes.txt -r wss://kusama-rpc.polkadot.io -o kusama-map.json', 'Specify reference chain and output file')
   .argv;
 
-// 将 session.nextKeys 的字段名映射到 author.hasKey keyType
+// Map session.nextKeys field names to author.hasKey keyType
 const FIELD_KEYTYPE_MAP = {
   grandpa: 'gran',
   babe: 'babe',
@@ -78,18 +64,18 @@ const FIELD_KEYTYPE_MAP = {
 };
 
 function parseNodesFile(path){
-  if(!fs.existsSync(path)) throw new Error(`nodes-file 不存在: ${path}`);
+  if(!fs.existsSync(path)) throw new Error(`nodes-file does not exist: ${path}`);
   const lines = fs.readFileSync(path,'utf8').split(/\r?\n/).map(l=>l.trim()).filter(Boolean);
   const entries = [];
   lines.forEach((line,i)=>{
-    if(line.startsWith('#')) return; // 注释
+    if(line.startsWith('#')) return; // comment
     let name, endpoint;
     if(line.includes(',')){
       [name, endpoint] = line.split(',').map(s=>s.trim());
     } else {
       [name, endpoint] = line.split(/\s+/);
     }
-    if(!name || !endpoint) throw new Error(`nodes-file 第 ${i+1} 行格式错误: ${line}`);
+    if(!name || !endpoint) throw new Error(`Format error at line ${i+1} in nodes-file: ${line}`);
     entries.push({ name, endpoint });
   });
   return entries;
@@ -117,18 +103,18 @@ async function collectValidatorKeyIndex(api){
 }
 
 async function tryMatchNode(nodeEntry, keyIndex){
-  let api; // 针对该节点单独连接
+  let api; // connect to this node separately
   const { name, endpoint } = nodeEntry;
   try {
     api = await ApiPromise.create({ provider: new WsProvider(endpoint) });
   } catch (e){
-    return { name, endpoint, error: `连接失败: ${e.message}` };
+    return { name, endpoint, error: `Connection failed: ${e.message}` };
   }
   try {
     if(!api.rpc.author || !api.rpc.author.hasKey){
-      return { name, endpoint, error: 'author.hasKey 不可用 (被禁用或无此方法)' };
+      return { name, endpoint, error: 'author.hasKey not available (disabled or method missing)' };
     }
-    // 去重 (同一 validator 可能多个字段) -> 按 key 列表
+    // deduplicate (same validator may have multiple fields) -> by key list
     const candidates = keyIndex.slice(0, argv['max-per-node-keys']);
     for(const { validator, keyType, pubKey, field } of candidates){
       try {
@@ -137,7 +123,7 @@ async function tryMatchNode(nodeEntry, keyIndex){
           return { name, endpoint, validator, keyType, pubKey, field };
         }
       } catch (inner){
-        if(argv.verbose) console.error(`[${name}] hasKey 调用失败 ${keyType}: ${inner.message}`);
+        if(argv.verbose) console.error(`[${name}] hasKey call failed ${keyType}: ${inner.message}`);
       }
     }
     return { name, endpoint, validator: null };
@@ -147,23 +133,23 @@ async function tryMatchNode(nodeEntry, keyIndex){
 }
 
 async function main(){
-  console.log(`🔗 连接参考节点: ${argv['reference-endpoint']}`);
+  console.log(`🔗 Connecting to reference node: ${argv['reference-endpoint']}`);
   const refApi = await ApiPromise.create({ provider: new WsProvider(argv['reference-endpoint']) });
-  console.log('✅ 参考节点已连接');
+  console.log('✅ Reference node connected');
   let keyIndex;
   try {
     keyIndex = await collectValidatorKeyIndex(refApi);
     if(!keyIndex.length){
-      console.log('⚠️ 未获取到任何 session.nextKeys 公钥；可能该链使用不同机制或无权限。');
+      console.log('⚠️ No session.nextKeys public keys retrieved; the chain may use a different mechanism or lack permissions.');
     } else {
-      console.log(`📦 收集到 ${keyIndex.length} 条 (validator, keyType, pubKey) 记录`);
+      console.log(`📦 Collected ${keyIndex.length} (validator, keyType, pubKey) records`);
     }
   } finally {
     await refApi.disconnect();
   }
 
   const nodes = parseNodesFile(argv['nodes-file']);
-  console.log(`🗂 待匹配节点数: ${nodes.length}`);
+  console.log(`🗂 Number of nodes to match: ${nodes.length}`);
 
   const limit = pLimit(Math.max(1, argv.concurrency));
   const tasks = nodes.map(n => limit(()=>tryMatchNode(n, keyIndex)));
@@ -174,7 +160,7 @@ async function main(){
     results.push(r);
     done++;
     if(argv.verbose || done % 5 === 0){
-      console.log(`⏱ 进度 ${done}/${nodes.length}`);
+      console.log(`⏱ Progress ${done}/${nodes.length}`);
     }
   }
 
@@ -191,16 +177,15 @@ async function main(){
   };
 
   fs.writeFileSync(argv.out, JSON.stringify(output, null, 2));
-  console.log(`💾 已写入映射文件 ${argv.out}`);
-  console.log(`✅ 匹配成功 ${success.length} / ${nodes.length}`);
+  console.log(`💾 Mapping file written to ${argv.out}`);
+  console.log(`✅ Matched ${success.length} / ${nodes.length}`);
   if(failed.length){
-    console.log('⚠️ 未匹配节点（可能原因：非验证者、关闭 author RPC、不同网络、limit 截断、无 session.keys）：');
+    console.log('⚠️ Unmatched nodes (possible reasons: not a validator, author RPC disabled, different network, limit truncated, no session.keys):');
     failed.forEach(f => console.log(` - ${f.name}@${f.endpoint} ${f.error ? ' => ' + f.error : ''}`));
   }
-  console.log('完成');
+  console.log('Done');
 }
 
 process.on('unhandledRejection', r => { console.error('Unhandled rejection', r); process.exit(1); });
 
 main().catch(e => { console.error('❌ Error:', e.message); process.exit(1); });
-

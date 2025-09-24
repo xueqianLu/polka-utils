@@ -69,6 +69,7 @@ fi
 echo "[run-collector] Starting collection: resolvedStartBlock=$RESOLVED_START_BLOCK endBlock=${END_BLOCK:-LATEST} endpoint=$WS_ENDPOINT format=$OUTPUT_FORMAT file=$OUTPUT_FILE"
 
 set -x
+node link-node-name -n nodes.txt -r $WS_ENDPOINT
 node collect.js $CMD_ARGS
 STATUS=$?
 set +x
