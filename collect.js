@@ -52,7 +52,7 @@ const argv = yargs(hideBin(process.argv))
     .option('include-empty', {
         type: 'boolean',
         default: false,
-        description: 'Include validators with zero blocks produced'
+        description: 'Include validators with zero blocks produced (ignored when --role is used; role mode always lists provided nodes)'
     })
     .option('sort-by', {
         type: 'string',
@@ -63,19 +63,23 @@ const argv = yargs(hideBin(process.argv))
     .option('min-blocks', {
         type: 'number',
         default: 0,
-        description: 'Minimum block count filter'
+        description: 'Minimum block count filter (ignored in role mode to ensure all nodes are shown)'
     })
-    // New: role mapping file
+    // Deprecated: previous role-file mapping (kept for backward compatibility but hidden in help)
     .option('role-file', {
         type: 'string',
-        description: 'Path to JSON role mapping (address->role OR [ { address, role } ])'
+        describe: false
+    })
+    // New: role (node mapping) file produced by link-node-names.js
+    .option('role', {
+        type: 'string',
+        description: 'Path to node mapping file (output of link-node-names.js). Only those nodes will be reported.'
     })
     .help()
     .alias('help', 'h')
-    .example('$0 -s 1000 -e 2000', 'Query validator stats from block 1000 to 2000')
-    .example('$0 -s 1000 -o json -f result.json', 'Query from block 1000 to latest, output JSON format and save')
-    .example('$0 -s 1000 -e 2000 -b 50 -v', 'Query with batch size 50 and verbose output')
-    .example('$0 -s 1000 --role-file roles-map.json', 'Use a role mapping file to add role column to output')
+    .example('$0 -s 1000 -e 2000', 'Query validator stats from block 1000 to 2000 (all validators)')
+    .example('$0 -s 1000 --role node-validator-map.json', 'Only report blocks produced by nodes listed in mapping file')
+    .example('$0 -s 1000 -o json -f result.json', 'Output JSON and save to a file')
     .argv;
 
 // Progress bar display
@@ -85,7 +89,7 @@ function showProgress(current, total, message = '') {
     process.stdout.write(`\r[${bar}] ${percentage}% ${message}`);
 }
 
-// Load role mapping from file (accept object or array)
+// Parse legacy role-file (address->role) kept for backward compatibility
 function loadRoleMapping(filePath, verbose = false) {
     if (!filePath) return {};
     if (!fs.existsSync(filePath)) {
@@ -113,8 +117,40 @@ function loadRoleMapping(filePath, verbose = false) {
     }
 }
 
-// Format output
-function formatOutput(stats, format, options = {}) {
+// New: parse node mapping produced by link-node-names.js
+function loadNodeMapping(filePath) {
+    if (!filePath) return null;
+    if (!fs.existsSync(filePath)) {
+        console.error(`❌ Node mapping file not found: ${filePath}`);
+        return null;
+    }
+    try {
+        const raw = fs.readFileSync(filePath, 'utf8');
+        const json = JSON.parse(raw);
+        if (!Array.isArray(json.nodes)) {
+            console.error('❌ Invalid node mapping file: missing nodes array');
+            return null;
+        }
+        // Build validator -> nodeName map (if duplicates keep first)
+        const validatorToNode = {};
+        const nodes = [];
+        json.nodes.forEach(entry => {
+            if (entry && entry.validator && entry.name) {
+                if (!validatorToNode[entry.validator]) {
+                    validatorToNode[entry.validator] = entry.name;
+                    nodes.push({ name: entry.name, validator: entry.validator });
+                }
+            }
+        });
+        return { validatorToNode, nodesMeta: nodes };
+    } catch (e) {
+        console.error(`❌ Failed to parse node mapping file: ${e.message}`);
+        return null;
+    }
+}
+
+// Format output (normal per-validator mode)
+function formatValidatorOutput(stats, format, options = {}) {
     const sortedStats = Object.entries(stats).sort((a, b) => {
         if (options.sortBy === 'validator') {
             return a[0].localeCompare(b[0]);
@@ -134,9 +170,9 @@ function formatOutput(stats, format, options = {}) {
 
         case 'csv': {
             const csvHeader = hasRoles ? 'Validator,Role,Block Count,Percentage\n' : 'Validator,Block Count,Percentage\n';
-            var blockcount = Object.values(stats).reduce((sum, data) => sum + data.blockCount, 0);
+            const blockcount = Object.values(stats).reduce((sum, data) => sum + data.blockCount, 0);
             const csvRows = filteredStats.map(([validator, data]) => {
-                const percentage = ((data.blockCount / blockcount) * 100).toFixed(2);
+                const percentage = blockcount === 0 ? '0.00' : ((data.blockCount / blockcount) * 100).toFixed(2);
                 if (hasRoles) {
                     return `"${validator}","${data.role || ''}",${data.blockCount},${percentage}%`;
                 }
@@ -147,9 +183,9 @@ function formatOutput(stats, format, options = {}) {
         case 'table':
         default:
             console.log('\n📊 Validator Block Production Statistics:');
-            console.log('='.repeat( hasRoles ? 100 : 80));
+            console.log('='.repeat(hasRoles ? 100 : 80));
 
-            var blockcount = Object.values(stats).reduce((sum, data) => sum + data.blockCount, 0);
+            const blockcount = Object.values(stats).reduce((sum, data) => sum + data.blockCount, 0);
 
             if (hasRoles) {
                 console.log(`${'Validator'.padEnd(50)} ${'Role'.padEnd(18)} ${'Blocks'.padStart(10)} ${'Share'.padStart(10)}`);
@@ -160,7 +196,7 @@ function formatOutput(stats, format, options = {}) {
             }
 
             filteredStats.forEach(([validator, data]) => {
-                const percentage = ((data.blockCount / blockcount) * 100).toFixed(2);
+                const percentage = blockcount === 0 ? '0.00' : ((data.blockCount / blockcount) * 100).toFixed(2);
                 const shortValidator = validator.length > 47 ? validator.substring(0, 47) + '...' : validator;
                 if (hasRoles) {
                     const roleShort = (data.role || '').substring(0, 17).padEnd(18);
@@ -180,6 +216,42 @@ function formatOutput(stats, format, options = {}) {
     }
 }
 
+// Format output (role node mapping mode)
+function formatNodeOutput(nodeStats, format) {
+    // nodeStats: { nodeName: { validator, blockCount } }
+    const entries = Object.entries(nodeStats).sort((a, b) => b[1].blockCount - a[1].blockCount);
+    const totalBlocks = entries.reduce((sum, [, v]) => sum + v.blockCount, 0);
+
+    switch (format) {
+        case 'json': {
+            return JSON.stringify(nodeStats, null, 2);
+        }
+        case 'csv': {
+            const header = 'Node,Validator,Block Count,Percentage\n';
+            const rows = entries.map(([name, data]) => {
+                const percentage = totalBlocks === 0 ? '0.00' : ((data.blockCount / totalBlocks) * 100).toFixed(2);
+                return `"${name}","${data.validator}",${data.blockCount},${percentage}%`;
+            }).join('\n');
+            return header + rows;
+        }
+        case 'table':
+        default: {
+            console.log('\n📊 Node Block Production Statistics (Role Mode):');
+            console.log('='.repeat(100));
+            console.log(`${'Node'.padEnd(20)} ${'Validator'.padEnd(50)} ${'Blocks'.padStart(10)} ${'Share'.padStart(10)}`);
+            console.log('-'.repeat(100));
+            entries.forEach(([name, data]) => {
+                const percentage = totalBlocks === 0 ? '0.00' : ((data.blockCount / totalBlocks) * 100).toFixed(2);
+                const validatorShort = data.validator.length > 47 ? data.validator.substring(0, 47) + '...' : data.validator;
+                console.log(`${name.padEnd(20)} ${validatorShort.padEnd(50)} ${data.blockCount.toString().padStart(10)} ${percentage.padStart(8)}%`);
+            });
+            console.log('-'.repeat(100));
+            console.log(`Total nodes: ${entries.length}, Total node blocks: ${totalBlocks}`);
+            return '';
+        }
+    }
+}
+
 // Safe wrapper for derive getBlockByNumber accommodating Observable or Promise-like return types
 async function deriveBlockByNumber(api, blockNum) {
     const result = api.derive.chain.getBlockByNumber(blockNum);
@@ -195,13 +267,22 @@ async function main() {
     let api = null;
 
     try {
+        const roleMode = !!argv.role;
+        if (roleMode && argv['role-file']) {
+            console.warn('⚠️ Both --role and --role-file provided. Ignoring legacy --role-file in favor of --role node mapping mode.');
+        }
+
         console.log('🔗 Connecting to network:', argv.endpoint);
         const provider = new WsProvider(argv.endpoint);
         api = await ApiPromise.create({ provider });
         console.log('✅ Connection successful');
 
-        // Load role mapping early
-        const roleMapping = loadRoleMapping(argv['role-file'], argv.verbose);
+        // Load legacy role mapping only if not in role mode
+        const roleMapping = !roleMode ? loadRoleMapping(argv['role-file'], argv.verbose) : {};
+        const nodeMapping = roleMode ? loadNodeMapping(argv.role) : null;
+        if (roleMode && !nodeMapping) {
+            throw new Error('Failed to load node mapping file for role mode');
+        }
 
         // Get chain information
         const chain = await api.rpc.system.chain();
@@ -223,7 +304,7 @@ async function main() {
         let totalBlocks = endBlock - argv.startBlock + 1;
         console.log(`🔍 Querying block range: ${argv.startBlock} to ${endBlock} (total ${totalBlocks} blocks)`);
 
-        const validatorStats = {};
+        const validatorStats = {}; // { validator: { blockCount, role? } }
         let processedBlocks = 0;
 
         // Batch processing using derive getBlockByNumber (already includes author extraction)
@@ -263,42 +344,59 @@ async function main() {
             showProgress(processedBlocks, totalBlocks, `Processed ${processedBlocks}/${totalBlocks} blocks`);
         }
 
-        console.log('\n✅ Data collection completed\n');
+        console.log('\n✅ Data collection completed');
 
-        // Apply role mapping
-        if (Object.keys(roleMapping).length) {
-            Object.entries(roleMapping).forEach(([addr, role]) => {
-                if (!validatorStats[addr]) return; // only annotate those present in stats
-                validatorStats[addr].role = role;
+        let outputData;
+        if (roleMode) {
+            // Build nodeStats from node mapping (always list all nodes, even zero)
+            const nodeStats = {}; // nodeName -> { validator, blockCount }
+            nodeMapping.nodesMeta.forEach(({ name, validator }) => {
+                const count = validatorStats[validator]?.blockCount || 0;
+                nodeStats[name] = { validator, blockCount: count };
             });
-        }
+            outputData = formatNodeOutput(nodeStats, argv.output);
+            if (argv.saveTo) {
+                const saveFmt = argv.saveTo.endsWith('.json') ? 'json' : argv.saveTo.endsWith('.csv') ? 'csv' : argv.output;
+                const saveContent = saveFmt === argv.output ? outputData : formatNodeOutput(nodeStats, saveFmt);
+                fs.writeFileSync(argv.saveTo, saveContent);
+                console.log(`💾 Results saved to: ${argv.saveTo}`);
+            }
+        } else {
+            // Apply legacy role mapping (address->role) if present
+            if (Object.keys(roleMapping).length) {
+                Object.entries(roleMapping).forEach(([addr, role]) => {
+                    if (!validatorStats[addr]) return; // only annotate those present in stats
+                    validatorStats[addr].role = role;
+                });
+            }
 
-        if (!argv.includeEmpty) {
-            Object.keys(validatorStats).forEach(validator => {
-                if (validatorStats[validator].blockCount === 0) {
-                    delete validatorStats[validator];
-                }
+            if (!argv.includeEmpty) {
+                Object.keys(validatorStats).forEach(validator => {
+                    if (validatorStats[validator].blockCount === 0) {
+                        delete validatorStats[validator];
+                    }
+                });
+            }
+
+            const out = formatValidatorOutput(validatorStats, argv.output, {
+                sortBy: argv.sortBy,
+                minBlocks: argv.minBlocks,
+                showRoles: Object.keys(roleMapping).length > 0
             });
+            outputData = out;
+            if (argv.saveTo) {
+                const fileOutput = formatValidatorOutput(validatorStats,
+                    argv.saveTo.endsWith('.json') ? 'json' :
+                        argv.saveTo.endsWith('.csv') ? 'csv' : argv.output,
+                    { sortBy: argv.sortBy, minBlocks: argv.minBlocks, showRoles: Object.keys(roleMapping).length > 0 }
+                );
+                fs.writeFileSync(argv.saveTo, fileOutput);
+                console.log(`💾 Results saved to: ${argv.saveTo}`);
+            }
         }
 
-        const output = formatOutput(validatorStats, argv.output, {
-            sortBy: argv.sortBy,
-            minBlocks: argv.minBlocks,
-            showRoles: Object.keys(roleMapping).length > 0
-        });
-
-        if (output) {
-            console.log(output);
-        }
-
-        if (argv.saveTo) {
-            const fileOutput = formatOutput(validatorStats,
-                argv.saveTo.endsWith('.json') ? 'json' :
-                    argv.saveTo.endsWith('.csv') ? 'csv' : argv.output,
-                { sortBy: argv.sortBy, minBlocks: argv.minBlocks, showRoles: Object.keys(roleMapping).length > 0 }
-            );
-            fs.writeFileSync(argv.saveTo, fileOutput);
-            console.log(`💾 Results saved to: ${argv.saveTo}`);
+        if (outputData) {
+            console.log(outputData);
         }
 
     } catch (error) {
