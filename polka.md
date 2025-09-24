@@ -1,74 +1,73 @@
-# Polkadot 时间
+# Polkadot Time Structure
 
-Era、Slot、区块号，这些都是 Polkadot 时间架构中的重要概念。
+Era, Session, Epoch, Slot, Block height — these are key concepts in Polkadot's hierarchical time system.
 
-## Polkadot 时间架构层次结构
+## Hierarchical Time Layers
 
-Polkadot 有一个层次化的时间结构：
+Polkadot defines a layered time hierarchy:
 
 ```
-Era (时代)
-├── Session (会话) × 6
-    ├── Epoch (纪元) × 1 (Session = Epoch)
-        ├── Slot (时隙) × 2400
-            ├── Block (区块) × 0 或 1
+Era
+├── Session × 6
+    ├── Epoch × 1  (Session = Epoch in current design)
+        ├── Slot × 2400
+            ├── Block × 0 or 1
 ```
 
-## 各层级详细解释
+## Layer Details
 
-### 1. **Slot (时隙)** - 最小时间单位
-- **持续时间**: 约 6 秒
-- **作用**: 每个 slot 都有可能产生一个区块
-- **机制**: 使用 BABE 共识，每个 slot 会随机分配给一个或多个验证者
-- **区块关系**: 1 个 slot ≈ 0-1 个区块（有时为空，有时有区块）
+### 1. Slot – The smallest scheduling unit
+- Duration: ~6 seconds
+- Purpose: Each slot may (or may not) produce exactly one block
+- Mechanism: BABE consensus assigns one or more validators to a slot probabilistically
+- Relationship: 1 slot ≈ 0–1 blocks (some slots produce no block)
 
-### 2. **Epoch (纪元)**
-- **持续时间**: 约 4 小时
-- **组成**: 2,400 个 slots
-- **作用**: BABE 协议的基本周期，验证者在每个 epoch 开始时知道自己在哪些 slot 中应该产生区块 [ref:27,28]
+### 2. Epoch
+- Duration: ~4 hours
+- Composition: 2,400 slots
+- Purpose: Fundamental scheduling period in BABE; at the epoch start validators know in which slots they are eligible to author blocks
 
-### 3. **Session (会话)**
-- **持续时间**: 约 4 小时（与 Epoch 相同）
-- **关系**: Session = Epoch
-- **作用**: 验证者集合变更的周期
+### 3. Session
+- Duration: ~4 hours (currently equal to Epoch)
+- Relationship: Session = Epoch
+- Purpose: Interval at which the active validator set may update
 
-### 4. **Era (时代)** - **奖励周期**
-- **持续时间**: 约 24 小时 
-- **组成**: 6 个 Sessions/Epochs 
-- **总 Slots**: 14,400 个 slots (2,400 × 6) 
-- **作用**: **这是质押奖励分配的周期** 
+### 4. Era – Reward / Staking accounting period
+- Duration: ~24 hours
+- Composition: 6 Sessions / Epochs
+- Total Slots: 14,400 (2,400 × 6)
+- Purpose: Primary unit for staking reward distribution
 
-## 为什么验证者收益按 Era 查询？
+## Why Are Validator Rewards Queried Per Era?
 
-### 1. **奖励分配机制**
-- 验证者奖励每个 Era 结算一次
-- Era Points (时代点数) 决定奖励分配比例
-- 只有在 Era 结束后才能计算出最终奖励
+### 1. Reward Settlement
+- Rewards are calculated and settled once per Era
+- Era Points determine proportional reward distribution
+- Final allocation is only known after the Era ends
 
-### 2. **Era Points 累积**
-验证者通过以下行为获得 Era Points：
-- **区块生产**: 每生产一个区块获得积分
-- **平行链验证**: 验证平行链区块获得积分
-- **其他网络贡献**: 如参与共识等
+### 2. Accumulation of Era Points
+Validators earn Era Points for activities such as:
+- Block production
+- Parachain validation
+- Other consensus-related duties
 
-### 3. **数据完整性**
-- 单个区块或 slot 无法体现完整的奖励信息
-- Era 级别的数据包含了完整的验证者表现评估
+### 3. Data Completeness
+- A single block or slot cannot reflect full validator performance
+- Aggregated Era-level data captures a meaningful performance summary
 
-## 实际数字对比
-
-以 Polkadot 主网为例：
+## Practical Numbers (Polkadot Mainnet Example)
 ```
-1 Era = 24 小时
-├── 6 Sessions = 4 小时 × 6
-    ├── 6 Epochs = 4 小时 × 6  
-        ├── 14,400 Slots = 6秒 × 14,400 = 24小时
-            ├── ~14,400 Blocks (理想情况下每个slot一个区块)
+1 Era = 24 hours
+├── 6 Sessions = 6 × 4h
+    ├── 6 Epochs = 6 × 4h
+        ├── 14,400 Slots = 14,400 × 6s ≈ 24h
+            ├── ~14,400 Blocks (ideal case: 1 block per slot)
 ```
 
-## 为什么不按区块号查询？
+## Why Not Query by Block Height for Rewards?
+1. Rewards are not assigned per block; they are Era-based.
+2. Per-block data is too granular and incomplete for reward logic.
+3. Accurate reward calculation requires aggregating all activity over an Era.
 
-1. **奖励不按区块分配**: 奖励是按整个 Era 的表现计算的，不是每个区块单独计算
-2. **数据分散**: 单个区块的信息无法反映验证者的整体表现
-3. **计算复杂**: 需要聚合整个 Era 内所有区块的数据才有意义
-
+---
+*Note:* Some implementation details (e.g. exact epoch/session equivalence or slot timing) may evolve with protocol upgrades. Always consult the latest Polkadot specifications or runtime documentation for precise values.
