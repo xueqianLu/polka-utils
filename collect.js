@@ -60,17 +60,7 @@ const argv = yargs(hideBin(process.argv))
         default: 'blocks',
         description: 'Sort by (block count or validator name)'
     })
-    .option('min-blocks', {
-        type: 'number',
-        default: 0,
-        description: 'Minimum block count filter (ignored in role mode to ensure all nodes are shown)'
-    })
-    // Deprecated: previous role-file mapping (kept for backward compatibility but hidden in help)
-    .option('role-file', {
-        type: 'string',
-        describe: false
-    })
-    // New: role (node mapping) file produced by link-node-names.js
+    // role (node mapping) file produced by link-node-names.js
     .option('role', {
         type: 'string',
         description: 'Path to node mapping file (output of link-node-names.js). Only those nodes will be reported.'
@@ -89,35 +79,7 @@ function showProgress(current, total, message = '') {
     process.stdout.write(`\r[${bar}] ${percentage}% ${message}`);
 }
 
-// Parse legacy role-file (address->role) kept for backward compatibility
-function loadRoleMapping(filePath, verbose = false) {
-    if (!filePath) return {};
-    if (!fs.existsSync(filePath)) {
-        console.error(`⚠️ Role file not found: ${filePath}`);
-        return {};
-    }
-    try {
-        const raw = fs.readFileSync(filePath, 'utf8');
-        const json = JSON.parse(raw);
-        const mapping = {};
-        if (Array.isArray(json)) {
-            json.forEach(e => {
-                if (e && e.address && e.role) mapping[e.address] = e.role;
-            });
-        } else if (typeof json === 'object' && json) {
-            Object.entries(json).forEach(([addr, role]) => {
-                if (typeof role === 'string') mapping[addr] = role;
-            });
-        }
-        if (verbose) console.log(`🔍 Loaded ${Object.keys(mapping).length} role mappings from ${filePath}`);
-        return mapping;
-    } catch (e) {
-        console.error(`⚠️ Failed to parse role file ${filePath}: ${e.message}`);
-        return {};
-    }
-}
-
-// New: parse node mapping produced by link-node-names.js
+// Parse node mapping produced by link-node-names.js
 function loadNodeMapping(filePath) {
     if (!filePath) return null;
     if (!fs.existsSync(filePath)) {
@@ -268,9 +230,6 @@ async function main() {
 
     try {
         const roleMode = !!argv.role;
-        if (roleMode && argv['role-file']) {
-            console.warn('⚠️ Both --role and --role-file provided. Ignoring legacy --role-file in favor of --role node mapping mode.');
-        }
 
         console.log('🔗 Connecting to network:', argv.endpoint);
         const provider = new WsProvider(argv.endpoint);
@@ -278,7 +237,6 @@ async function main() {
         console.log('✅ Connection successful');
 
         // Load legacy role mapping only if not in role mode
-        const roleMapping = !roleMode ? loadRoleMapping(argv['role-file'], argv.verbose) : {};
         const nodeMapping = roleMode ? loadNodeMapping(argv.role) : null;
         if (roleMode && !nodeMapping) {
             throw new Error('Failed to load node mapping file for role mode');
@@ -362,13 +320,6 @@ async function main() {
                 console.log(`💾 Results saved to: ${argv.saveTo}`);
             }
         } else {
-            // Apply legacy role mapping (address->role) if present
-            if (Object.keys(roleMapping).length) {
-                Object.entries(roleMapping).forEach(([addr, role]) => {
-                    if (!validatorStats[addr]) return; // only annotate those present in stats
-                    validatorStats[addr].role = role;
-                });
-            }
 
             if (!argv.includeEmpty) {
                 Object.keys(validatorStats).forEach(validator => {
