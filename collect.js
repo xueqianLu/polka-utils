@@ -154,7 +154,6 @@ function formatValidatorOutput(stats, format, options = {}) {
 
                 console.log(`${shortValidator.padEnd(50)} ${data.blockCount.toString().padStart(10)} ${percentage.padStart(8)}%`);
             });
-            console.log(filteredStats)
 
             console.log('-'.repeat(80));
 
