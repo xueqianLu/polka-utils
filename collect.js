@@ -332,14 +332,14 @@ async function main() {
             const out = formatValidatorOutput(validatorStats, argv.output, {
                 sortBy: argv.sortBy,
                 minBlocks: argv.minBlocks,
-                showRoles: Object.keys(roleMapping).length > 0
+                showRoles: false
             });
             outputData = out;
             if (argv.saveTo) {
                 const fileOutput = formatValidatorOutput(validatorStats,
                     argv.saveTo.endsWith('.json') ? 'json' :
                         argv.saveTo.endsWith('.csv') ? 'csv' : argv.output,
-                    { sortBy: argv.sortBy, minBlocks: argv.minBlocks, showRoles: Object.keys(roleMapping).length > 0 }
+                    { sortBy: argv.sortBy, minBlocks: argv.minBlocks, showRoles: false }
                 );
                 fs.writeFileSync(argv.saveTo, fileOutput);
                 console.log(`💾 Results saved to: ${argv.saveTo}`);
