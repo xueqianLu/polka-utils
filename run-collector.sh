@@ -69,7 +69,7 @@ fi
 echo "[run-collector] Starting collection: resolvedStartBlock=$RESOLVED_START_BLOCK endBlock=${END_BLOCK:-LATEST} endpoint=$WS_ENDPOINT format=$OUTPUT_FORMAT file=$OUTPUT_FILE"
 
 set -x
-node link-node-name.js -n nodes.txt -r $WS_ENDPOINT
+node link-node-names.js -n nodes.txt -r $WS_ENDPOINT
 if [ "1" = "1" ]; then
   CMD_ARGS="$CMD_ARGS --role node-validator-map.json"
 fi
