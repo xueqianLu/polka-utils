@@ -4,6 +4,7 @@ import { ApiPromise, WsProvider } from '@polkadot/api';
 import yargs from 'yargs';
 import { hideBin } from 'yargs/helpers';
 import fs from 'fs';
+import { firstValueFrom } from 'rxjs';
 
 // Configure command line arguments
 const argv = yargs(hideBin(process.argv))
@@ -126,16 +127,24 @@ function formatOutput(stats, format, options = {}) {
     }
 }
 
+// Safe wrapper for derive getBlockByNumber accommodating Observable or Promise-like return types
+async function deriveBlockByNumber(api, blockNum) {
+    const result = api.derive.chain.getBlockByNumber(blockNum);
+    // If it looks like an Observable, use firstValueFrom
+    if (result && typeof result.subscribe === 'function') {
+        return await firstValueFrom(result);
+    }
+    // Otherwise it may already be a Promise or a direct value
+    return await result;
+}
+
 async function main() {
     let api = null;
 
     try {
         console.log('🔗 Connecting to network:', argv.endpoint);
-
-        // Create provider and API instance
         const provider = new WsProvider(argv.endpoint);
         api = await ApiPromise.create({ provider });
-
         console.log('✅ Connection successful');
 
         // Get chain information
@@ -151,7 +160,6 @@ async function main() {
             console.log(`🎯 Using latest block as end block: ${endBlock}`);
         }
 
-        // Validate block range
         if (argv.startBlock > endBlock) {
             throw new Error('Start block number cannot be greater than end block number');
         }
@@ -159,73 +167,36 @@ async function main() {
         let totalBlocks = endBlock - argv.startBlock + 1;
         console.log(`🔍 Querying block range: ${argv.startBlock} to ${endBlock} (total ${totalBlocks} blocks)`);
 
-        // Validator statistics
         const validatorStats = {};
         let processedBlocks = 0;
 
-        // Process blocks in batches
+        // Batch processing using derive getBlockByNumber (already includes author extraction)
         for (let i = argv.startBlock; i <= endBlock; i += argv.batchSize) {
             const batchEnd = Math.min(i + argv.batchSize - 1, endBlock);
             const batchPromises = [];
 
-            // Create queries for current batch
             for (let blockNum = i; blockNum <= batchEnd; blockNum++) {
                 batchPromises.push(
-                    api.rpc.chain.getBlockHash(blockNum)
-                        .then(hash => api.rpc.chain.getBlock(hash))
-                        .then(block => ({ blockNum, block }))
+                    deriveBlockByNumber(api, blockNum)
+                        .then(extended => ({
+                            blockNum,
+                            author: (extended && extended.author && extended.author.toString()) || 'Unknown'
+                        }))
+                        .catch(err => ({ blockNum, author: 'Unknown', error: err }))
                 );
             }
 
-            // Wait for current batch to complete
             const batchResults = await Promise.all(batchPromises);
 
-            // Process batch results
-            for (const { blockNum, block } of batchResults) {
-                // Get block author (validator)
-                let author = 'Unknown';
-
-                // Try to get author information from block header
-                if (block.block.header.digest && block.block.header.digest.logs) {
-                    for (const log of block.block.header.digest.logs) {
-                        if (log.isConsensus && log.asConsensus[0].toString() === 'BABE') {
-                            // This might need adjustment based on specific consensus algorithm
-                            try {
-                                // Simplified handling: use first 16 characters of block hash as identifier
-                                author = block.block.header.parentHash.toString().substring(0, 16);
-                            } catch (e) {
-                                // If parsing fails, use default value
-                            }
-                        }
-                    }
+            for (const { blockNum, author, error } of batchResults) {
+                if (error && argv.verbose) {
+                    console.log(`\n⚠️ Failed to derive block ${blockNum}: ${error.message}`);
                 }
 
-                // Try to get more accurate validator information
-                try {
-                    const blockHash = await api.rpc.chain.getBlockHash(blockNum);
-                    const apiAt = await api.at(blockHash);
-
-                    // Get session validators
-                    if (apiAt.query.session && apiAt.query.session.validators) {
-                        const validators = await apiAt.query.session.validators();
-                        if (validators.length > 0) {
-                            // Use heuristic method to determine block author
-                            const authorIndex = blockNum % validators.length;
-                            author = validators[authorIndex].toString();
-                        }
-                    }
-                } catch (e) {
-                    if (argv.verbose) {
-                        console.log(`\n⚠️ Cannot get detailed validator info for block ${blockNum}:`, e.message);
-                    }
-                }
-
-                // Statistics
                 if (!validatorStats[author]) {
                     validatorStats[author] = { blockCount: 0 };
                 }
                 validatorStats[author].blockCount++;
-
                 processedBlocks++;
 
                 if (argv.verbose && processedBlocks % 10 === 0) {
@@ -233,13 +204,11 @@ async function main() {
                 }
             }
 
-            // Show progress
             showProgress(processedBlocks, totalBlocks, `Processed ${processedBlocks}/${totalBlocks} blocks`);
         }
 
         console.log('\n✅ Data collection completed\n');
 
-        // Filter empty results
         if (!argv.includeEmpty) {
             Object.keys(validatorStats).forEach(validator => {
                 if (validatorStats[validator].blockCount === 0) {
@@ -248,7 +217,6 @@ async function main() {
             });
         }
 
-        // Format and output results
         const output = formatOutput(validatorStats, argv.output, {
             sortBy: argv.sortBy,
             minBlocks: argv.minBlocks
@@ -258,7 +226,6 @@ async function main() {
             console.log(output);
         }
 
-        // Save to file
         if (argv.saveTo) {
             const fileOutput = formatOutput(validatorStats,
                 argv.saveTo.endsWith('.json') ? 'json' :
