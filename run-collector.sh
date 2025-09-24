@@ -70,6 +70,10 @@ echo "[run-collector] Starting collection: resolvedStartBlock=$RESOLVED_START_BL
 
 set -x
 node link-node-name -n nodes.txt -r $WS_ENDPOINT
+if [ "1" = "1" ]; then
+  CMD_ARGS="$CMD_ARGS --role node-validator-map.json"
+fi
+
 node collect.js $CMD_ARGS
 STATUS=$?
 set +x
