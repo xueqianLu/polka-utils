@@ -11,7 +11,7 @@ RUN npm install --production
 COPY . .
 
 # Ensure scripts are executable
-RUN chmod +x sendtx.js collect.js link-node-names.js run-sendtx.sh scripts/run-collector.sh 2>/dev/null || true
+RUN chmod +x sendtx.js collect.js link-node-names.js run-sendtx.sh run-collector.sh 2>/dev/null || true
 
 # Default entrypoint can be overridden by docker-compose service commands
 ENTRYPOINT ["node"]
