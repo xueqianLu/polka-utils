@@ -65,11 +65,17 @@ const argv = yargs(hideBin(process.argv))
         default: 0,
         description: 'Minimum block count filter'
     })
+    // New: role mapping file
+    .option('role-file', {
+        type: 'string',
+        description: 'Path to JSON role mapping (address->role OR [ { address, role } ])'
+    })
     .help()
     .alias('help', 'h')
     .example('$0 -s 1000 -e 2000', 'Query validator stats from block 1000 to 2000')
     .example('$0 -s 1000 -o json -f result.json', 'Query from block 1000 to latest, output JSON format and save')
     .example('$0 -s 1000 -e 2000 -b 50 -v', 'Query with batch size 50 and verbose output')
+    .example('$0 -s 1000 --role-file roles-map.json', 'Use a role mapping file to add role column to output')
     .argv;
 
 // Progress bar display
@@ -77,6 +83,34 @@ function showProgress(current, total, message = '') {
     const percentage = Math.floor((current / total) * 100);
     const bar = '█'.repeat(Math.floor(percentage / 2)) + '░'.repeat(50 - Math.floor(percentage / 2));
     process.stdout.write(`\r[${bar}] ${percentage}% ${message}`);
+}
+
+// Load role mapping from file (accept object or array)
+function loadRoleMapping(filePath, verbose = false) {
+    if (!filePath) return {};
+    if (!fs.existsSync(filePath)) {
+        console.error(`⚠️ Role file not found: ${filePath}`);
+        return {};
+    }
+    try {
+        const raw = fs.readFileSync(filePath, 'utf8');
+        const json = JSON.parse(raw);
+        const mapping = {};
+        if (Array.isArray(json)) {
+            json.forEach(e => {
+                if (e && e.address && e.role) mapping[e.address] = e.role;
+            });
+        } else if (typeof json === 'object' && json) {
+            Object.entries(json).forEach(([addr, role]) => {
+                if (typeof role === 'string') mapping[addr] = role;
+            });
+        }
+        if (verbose) console.log(`🔍 Loaded ${Object.keys(mapping).length} role mappings from ${filePath}`);
+        return mapping;
+    } catch (e) {
+        console.error(`⚠️ Failed to parse role file ${filePath}: ${e.message}`);
+        return {};
+    }
 }
 
 // Format output
@@ -92,36 +126,55 @@ function formatOutput(stats, format, options = {}) {
         data.blockCount >= options.minBlocks
     );
 
+    const hasRoles = options.showRoles && filteredStats.some(([_, d]) => d.role);
+
     switch (format) {
         case 'json':
             return JSON.stringify(Object.fromEntries(filteredStats), null, 2);
 
-        case 'csv':
-            const csvHeader = 'Validator,Block Count,Percentage\n';
+        case 'csv': {
+            const csvHeader = hasRoles ? 'Validator,Role,Block Count,Percentage\n' : 'Validator,Block Count,Percentage\n';
             var blockcount = Object.values(stats).reduce((sum, data) => sum + data.blockCount, 0);
             const csvRows = filteredStats.map(([validator, data]) => {
                 const percentage = ((data.blockCount / blockcount) * 100).toFixed(2);
+                if (hasRoles) {
+                    return `"${validator}","${data.role || ''}",${data.blockCount},${percentage}%`;
+                }
                 return `"${validator}",${data.blockCount},${percentage}%`;
             }).join('\n');
             return csvHeader + csvRows;
-
+        }
         case 'table':
         default:
             console.log('\n📊 Validator Block Production Statistics:');
-            console.log('='.repeat(80));
+            console.log('='.repeat( hasRoles ? 100 : 80));
 
             var blockcount = Object.values(stats).reduce((sum, data) => sum + data.blockCount, 0);
 
-            console.log(`${'Validator'.padEnd(50)} ${'Blocks'.padStart(10)} ${'Share'.padStart(10)}`);
-            console.log('-'.repeat(80));
+            if (hasRoles) {
+                console.log(`${'Validator'.padEnd(50)} ${'Role'.padEnd(18)} ${'Blocks'.padStart(10)} ${'Share'.padStart(10)}`);
+                console.log('-'.repeat(100));
+            } else {
+                console.log(`${'Validator'.padEnd(50)} ${'Blocks'.padStart(10)} ${'Share'.padStart(10)}`);
+                console.log('-'.repeat(80));
+            }
 
             filteredStats.forEach(([validator, data]) => {
                 const percentage = ((data.blockCount / blockcount) * 100).toFixed(2);
                 const shortValidator = validator.length > 47 ? validator.substring(0, 47) + '...' : validator;
-                console.log(`${shortValidator.padEnd(50)} ${data.blockCount.toString().padStart(10)} ${percentage.padStart(8)}%`);
+                if (hasRoles) {
+                    const roleShort = (data.role || '').substring(0, 17).padEnd(18);
+                    console.log(`${shortValidator.padEnd(50)} ${roleShort}${data.blockCount.toString().padStart(10)} ${percentage.padStart(8)}%`);
+                } else {
+                    console.log(`${shortValidator.padEnd(50)} ${data.blockCount.toString().padStart(10)} ${percentage.padStart(8)}%`);
+                }
             });
 
-            console.log('-'.repeat(80));
+            if (hasRoles) {
+                console.log('-'.repeat(100));
+            } else {
+                console.log('-'.repeat(80));
+            }
             console.log(`Total: ${filteredStats.length} validators, ${blockcount} blocks`);
             return '';
     }
@@ -146,6 +199,9 @@ async function main() {
         const provider = new WsProvider(argv.endpoint);
         api = await ApiPromise.create({ provider });
         console.log('✅ Connection successful');
+
+        // Load role mapping early
+        const roleMapping = loadRoleMapping(argv['role-file'], argv.verbose);
 
         // Get chain information
         const chain = await api.rpc.system.chain();
@@ -209,6 +265,14 @@ async function main() {
 
         console.log('\n✅ Data collection completed\n');
 
+        // Apply role mapping
+        if (Object.keys(roleMapping).length) {
+            Object.entries(roleMapping).forEach(([addr, role]) => {
+                if (!validatorStats[addr]) return; // only annotate those present in stats
+                validatorStats[addr].role = role;
+            });
+        }
+
         if (!argv.includeEmpty) {
             Object.keys(validatorStats).forEach(validator => {
                 if (validatorStats[validator].blockCount === 0) {
@@ -219,7 +283,8 @@ async function main() {
 
         const output = formatOutput(validatorStats, argv.output, {
             sortBy: argv.sortBy,
-            minBlocks: argv.minBlocks
+            minBlocks: argv.minBlocks,
+            showRoles: Object.keys(roleMapping).length > 0
         });
 
         if (output) {
@@ -230,7 +295,7 @@ async function main() {
             const fileOutput = formatOutput(validatorStats,
                 argv.saveTo.endsWith('.json') ? 'json' :
                     argv.saveTo.endsWith('.csv') ? 'csv' : argv.output,
-                { sortBy: argv.sortBy, minBlocks: argv.minBlocks }
+                { sortBy: argv.sortBy, minBlocks: argv.minBlocks, showRoles: Object.keys(roleMapping).length > 0 }
             );
             fs.writeFileSync(argv.saveTo, fileOutput);
             console.log(`💾 Results saved to: ${argv.saveTo}`);
