@@ -1,10 +1,10 @@
 #!/usr/bin/env node
 
-import { ApiPromise, WsProvider } from '@polkadot/api';
+import {ApiPromise, WsProvider} from '@polkadot/api';
 import yargs from 'yargs';
-import { hideBin } from 'yargs/helpers';
+import {hideBin} from 'yargs/helpers';
 import fs from 'fs';
-import { firstValueFrom } from 'rxjs';
+import {firstValueFrom} from 'rxjs';
 
 // Configure command line arguments
 const argv = yargs(hideBin(process.argv))
@@ -121,7 +121,7 @@ function formatValidatorOutput(stats, format, options = {}) {
     });
 
     const filteredStats = sortedStats.filter(([_, data]) =>
-        data.blockCount >= options.minBlocks
+        true
     );
 
     switch (format) {
@@ -144,7 +144,6 @@ function formatValidatorOutput(stats, format, options = {}) {
 
             const blockcount = Object.values(stats).reduce((sum, data) => sum + data.blockCount, 0);
 
-
             console.log(`${'Validator'.padEnd(50)} ${'Blocks'.padStart(10)} ${'Share'.padStart(10)}`);
             console.log('-'.repeat(80));
 
@@ -155,6 +154,7 @@ function formatValidatorOutput(stats, format, options = {}) {
 
                 console.log(`${shortValidator.padEnd(50)} ${data.blockCount.toString().padStart(10)} ${percentage.padStart(8)}%`);
             });
+            console.log(filteredStats)
 
             console.log('-'.repeat(80));
 
@@ -305,11 +305,10 @@ async function main() {
                 console.log(`💾 Results saved to: ${argv.saveTo}`);
             }
         } else {
-            const out = formatValidatorOutput(validatorStats, argv.output, {
+            outputData = formatValidatorOutput(validatorStats, argv.output, {
                 sortBy: argv.sortBy,
                 minBlocks: argv.minBlocks
             });
-            outputData = out;
             if (argv.saveTo) {
                 const fileOutput = formatValidatorOutput(validatorStats,
                     argv.saveTo.endsWith('.json') ? 'json' :
